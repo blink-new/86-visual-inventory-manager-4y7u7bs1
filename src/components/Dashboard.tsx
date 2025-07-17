@@ -57,7 +57,21 @@ export function Dashboard({ onNavigate, databaseAvailable = true }: DashboardPro
         setStats(stats)
       }
     } catch (error) {
-      console.error('Error loading dashboard stats:', error)
+      // If database is unavailable, try to get stats from localStorage
+      if (!databaseAvailable) {
+        try {
+          const user = await blink.auth.me()
+          const stats = await localDB.getStats(user.id)
+          setStats(stats)
+          return
+        } catch (localError) {
+          console.error('Error loading local stats:', localError)
+        }
+      } else {
+        // Only log unexpected errors when database should be available
+        console.error('Error loading dashboard stats:', error)
+      }
+      
       setStats({
         totalImages: 0,
         totalZones: 0,

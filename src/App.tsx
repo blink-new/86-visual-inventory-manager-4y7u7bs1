@@ -24,27 +24,31 @@ function App() {
     if (!user) return
     
     try {
-      // Try a simple database query to check if database exists
+      // Try to check if database exists by attempting a simple SQL query
       await blink.db.images.list({ where: { userId: user.id }, limit: 1 })
       setDatabaseError(false)
     } catch (error) {
-      console.log('Database check error:', error)
       // Check for various database not found error patterns
       const errorMessage = error?.message || ''
       const errorCode = error?.code || ''
       const errorStatus = error?.status || 0
       
+      // Database is unavailable if we get these specific errors
       if (errorMessage.includes('Database for project') || 
           errorMessage.includes('not found') ||
           errorMessage.includes('PGRST116') ||
           errorMessage.includes('maximum database count') ||
+          errorMessage.includes('failed with status 404') ||
           errorCode === 'NETWORK_ERROR' ||
           errorCode === 'SQL_EXECUTION_ERROR' ||
           errorStatus === 404 ||
           errorStatus === 400) {
+        // This is expected - database is not available, use demo mode
+        console.log('Database unavailable, switching to demo mode with localStorage')
         setDatabaseError(true)
       } else {
         // For other errors, assume database is available but there's a different issue
+        console.error('Unexpected database error:', error)
         setDatabaseError(false)
       }
     } finally {

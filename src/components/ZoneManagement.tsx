@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { MapPin, Edit, Trash2, Package } from 'lucide-react'
 import { blink } from '../blink/client'
+import { localDB } from '../utils/localStorage'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
@@ -41,37 +42,43 @@ export function ZoneManagement({ onNavigate, databaseAvailable = true }: ZoneMan
   const { toast } = useToast()
 
   const loadData = useCallback(async () => {
-    // Skip database calls if database is not available
-    if (!databaseAvailable) {
-      setZones([])
-      setImages([])
-      setLoading(false)
-      return
-    }
-
     try {
       const user = await blink.auth.me()
       
-      // Load zones and images
-      const [zonesData, imagesData] = await Promise.all([
-        blink.db.zones.list({
-          where: { userId: user.id },
-          orderBy: { createdAt: 'desc' }
-        }),
-        blink.db.images.list({
-          where: { userId: user.id },
-          orderBy: { createdAt: 'desc' }
-        })
-      ])
+      if (databaseAvailable) {
+        // Load zones and images from database
+        const [zonesData, imagesData] = await Promise.all([
+          blink.db.zones.list({
+            where: { userId: user.id },
+            orderBy: { createdAt: 'desc' }
+          }),
+          blink.db.images.list({
+            where: { userId: user.id },
+            orderBy: { createdAt: 'desc' }
+          })
+        ])
 
-      setZones(zonesData)
-      setImages(imagesData)
+        setZones(zonesData)
+        setImages(imagesData)
+      } else {
+        // Load zones and images from local storage
+        const [zonesData, imagesData] = await Promise.all([
+          localDB.getZones(user.id),
+          localDB.getImages(user.id)
+        ])
+
+        setZones(zonesData.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()))
+        setImages(imagesData.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()))
+      }
     } catch (error) {
       console.error('Error loading data:', error)
       setZones([])
       setImages([])
-      // Don't show error toast for database not found - this is expected during setup
-      if (!error.message?.includes('Database for project')) {
+      // Don't show error toast for expected database errors
+      const errorMessage = error?.message || ''
+      if (!errorMessage.includes('Database for project') && 
+          !errorMessage.includes('failed with status 404') &&
+          !errorMessage.includes('maximum database count')) {
         toast({
           title: 'Error',
           description: 'Failed to load zones',

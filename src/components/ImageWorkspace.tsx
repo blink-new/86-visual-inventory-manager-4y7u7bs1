@@ -65,16 +65,33 @@ export function ImageWorkspace({ onNavigate, databaseAvailable = true }: ImageWo
         setImages(imageData.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()))
       }
     } catch (error) {
-      console.error('Error loading images:', error)
-      setImages([])
-      // Don't show error toast for database not found - this is expected during setup
-      if (!error.message?.includes('Database for project')) {
-        toast({
-          title: 'Error',
-          description: 'Failed to load images',
-          variant: 'destructive'
-        })
+      // If database is unavailable, try to get images from localStorage
+      if (!databaseAvailable) {
+        try {
+          const user = await blink.auth.me()
+          const imageData = await localDB.getImages(user.id)
+          setImages(imageData.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()))
+          return
+        } catch (localError) {
+          console.error('Error loading local images:', localError)
+        }
+      } else {
+        // Only log unexpected errors when database should be available
+        console.error('Error loading images:', error)
+        // Don't show error toast for expected database errors
+        const errorMessage = error?.message || ''
+        if (!errorMessage.includes('Database for project') && 
+            !errorMessage.includes('failed with status 404') &&
+            !errorMessage.includes('maximum database count')) {
+          toast({
+            title: 'Error',
+            description: 'Failed to load images',
+            variant: 'destructive'
+          })
+        }
       }
+      
+      setImages([])
     }
   }, [databaseAvailable, toast])
 

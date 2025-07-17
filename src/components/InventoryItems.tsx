@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Package, Plus, Edit, Trash2, AlertTriangle } from 'lucide-react'
 import { blink } from '../blink/client'
+import { localDB } from '../utils/localStorage'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
@@ -56,37 +57,43 @@ export function InventoryItems({ onNavigate, databaseAvailable = true }: Invento
   const { toast } = useToast()
 
   const loadData = useCallback(async () => {
-    // Skip database calls if database is not available
-    if (!databaseAvailable) {
-      setItems([])
-      setZones([])
-      setLoading(false)
-      return
-    }
-
     try {
       const user = await blink.auth.me()
       
-      const [itemsData, zonesData] = await Promise.all([
-        blink.db.inventoryItems.list({
-          where: { userId: user.id },
-          orderBy: { updatedAt: 'desc' }
-        }),
-        blink.db.zones.list({
-          where: { userId: user.id },
-          orderBy: { name: 'asc' }
-        })
-      ])
+      if (databaseAvailable) {
+        // Load from database
+        const [itemsData, zonesData] = await Promise.all([
+          blink.db.inventoryItems.list({
+            where: { userId: user.id },
+            orderBy: { updatedAt: 'desc' }
+          }),
+          blink.db.zones.list({
+            where: { userId: user.id },
+            orderBy: { name: 'asc' }
+          })
+        ])
 
-      setItems(itemsData)
-      setZones(zonesData)
+        setItems(itemsData)
+        setZones(zonesData)
+      } else {
+        // Load from local storage
+        const [itemsData, zonesData] = await Promise.all([
+          localDB.getInventoryItems(user.id),
+          localDB.getZones(user.id)
+        ])
+
+        setItems(itemsData.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()))
+        setZones(zonesData.sort((a, b) => a.name.localeCompare(b.name)))
+      }
     } catch (error) {
       console.error('Error loading data:', error)
-      // Set empty arrays when database is not available
       setItems([])
       setZones([])
-      // Don't show error toast for database not found - this is expected during setup
-      if (!error.message?.includes('Database for project')) {
+      // Don't show error toast for expected database errors
+      const errorMessage = error?.message || ''
+      if (!errorMessage.includes('Database for project') && 
+          !errorMessage.includes('failed with status 404') &&
+          !errorMessage.includes('maximum database count')) {
         toast({
           title: 'Error',
           description: 'Failed to load inventory items',

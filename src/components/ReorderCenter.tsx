@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { ShoppingCart, AlertTriangle, Package, CheckCircle, X } from 'lucide-react'
 import { blink } from '../blink/client'
+import { localDB } from '../utils/localStorage'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
@@ -48,60 +49,89 @@ export function ReorderCenter({ onNavigate, databaseAvailable = true }: ReorderC
   const { toast } = useToast()
 
   const loadData = useCallback(async () => {
-    // Skip database calls if database is not available
-    if (!databaseAvailable) {
-      setItems([])
-      setZones([])
-      setReorderItems([])
-      setLoading(false)
-      return
-    }
-
     try {
       const user = await blink.auth.me()
       
-      const [itemsData, zonesData] = await Promise.all([
-        blink.db.inventoryItems.list({
-          where: { userId: user.id },
-          orderBy: { updatedAt: 'desc' }
-        }),
-        blink.db.zones.list({
-          where: { userId: user.id }
-        })
-      ])
+      if (databaseAvailable) {
+        // Load from database
+        const [itemsData, zonesData] = await Promise.all([
+          blink.db.inventoryItems.list({
+            where: { userId: user.id },
+            orderBy: { updatedAt: 'desc' }
+          }),
+          blink.db.zones.list({
+            where: { userId: user.id }
+          })
+        ])
 
-      setItems(itemsData)
-      setZones(zonesData)
+        setItems(itemsData)
+        setZones(zonesData)
 
-      // Filter items that need reordering
-      const lowStockItems = itemsData.filter(item => 
-        item.quantity <= item.reorderThreshold
-      )
-
-      // Create reorder items with zone names and suggested quantities
-      const reorderList = lowStockItems.map(item => {
-        const zone = zonesData.find(z => z.id === item.zoneId)
-        const suggestedQuantity = Math.max(
-          item.reorderThreshold * 2, // Suggest 2x the threshold
-          item.reorderThreshold + 10 // Or threshold + 10, whichever is higher
+        // Filter items that need reordering
+        const lowStockItems = itemsData.filter(item => 
+          item.quantity <= item.reorderThreshold
         )
 
-        return {
-          ...item,
-          zoneName: zone?.name || 'Unknown Zone',
-          suggestedQuantity,
-          selected: true // Default to selected
-        }
-      })
+        // Create reorder items with zone names and suggested quantities
+        const reorderList = lowStockItems.map(item => {
+          const zone = zonesData.find(z => z.id === item.zoneId)
+          const suggestedQuantity = Math.max(
+            item.reorderThreshold * 2, // Suggest 2x the threshold
+            item.reorderThreshold + 10 // Or threshold + 10, whichever is higher
+          )
 
-      setReorderItems(reorderList)
+          return {
+            ...item,
+            zoneName: zone?.name || 'Unknown Zone',
+            suggestedQuantity,
+            selected: true // Default to selected
+          }
+        })
+
+        setReorderItems(reorderList)
+      } else {
+        // Load from local storage
+        const [itemsData, zonesData] = await Promise.all([
+          localDB.getInventoryItems(user.id),
+          localDB.getZones(user.id)
+        ])
+
+        setItems(itemsData)
+        setZones(zonesData)
+
+        // Filter items that need reordering
+        const lowStockItems = itemsData.filter(item => 
+          item.quantity <= item.reorderThreshold
+        )
+
+        // Create reorder items with zone names and suggested quantities
+        const reorderList = lowStockItems.map(item => {
+          const zone = zonesData.find(z => z.id === item.zoneId)
+          const suggestedQuantity = Math.max(
+            item.reorderThreshold * 2, // Suggest 2x the threshold
+            item.reorderThreshold + 10 // Or threshold + 10, whichever is higher
+          )
+
+          return {
+            ...item,
+            zoneName: zone?.name || 'Unknown Zone',
+            suggestedQuantity,
+            selected: true // Default to selected
+          }
+        })
+
+        setReorderItems(reorderList)
+      }
     } catch (error) {
       console.error('Error loading data:', error)
       setItems([])
       setZones([])
       setReorderItems([])
-      // Don't show error toast for database not found - this is expected during setup
-      if (!error.message?.includes('Database for project')) {
+      // Don't show error toast for expected database errors
+      const errorMessage = error?.message || ''
+      if (!errorMessage.includes('Database for project') && 
+          !errorMessage.includes('failed with status 404') &&
+          !errorMessage.includes('maximum database count')) {
         toast({
           title: 'Error',
           description: 'Failed to load reorder data',
